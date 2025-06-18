@@ -45,33 +45,33 @@ async def boost_volume():
     while True:
         for account in accounts:
             address, key = account
-            bnb = trader.get_bnb_balance(address)
-            if bnb > 0 and trader.can_buy(bnb, wallet=address):
-                result = trader.buy(address, key, bnb)
+            pls = trader.get_pls_balance(address)  # Changed from get_bnb_balance
+            if pls > 0 and trader.can_buy(pls, wallet=address):
+                result = trader.buy(address, key, pls)
                 await bot.send_message(channel_id,
-                                       f'Bought {result["amount"]} {trader.symbol} tokens with {result["bnb"]} BNB\n{TX_URL % result["tx"]}')
+                                       f'Bought {result["amount"]} {trader.symbol} tokens with {result["bnb"]} PLS\n{TX_URL % result["tx"]}')
                 await asyncio.sleep(10)
             tokens_amount = trader.get_token_balance(address)
             if tokens_amount > 0:
                 result = trader.sell(address, key, tokens_amount)
                 await bot.send_message(channel_id,
-                                       f'Sold {result["amount"]} {trader.symbol} tokens for {result["bnb"]} BNB\n{TX_URL % result["tx"]}')
-            # logger.error(f"Account {address} can't buy and sell\nBNB: {bnb}\nTokens amount:{tokens_amount}")
+                                       f'Sold {result["amount"]} {trader.symbol} tokens for {result["bnb"]} PLS\n{TX_URL % result["tx"]}')
+            # logger.error(f"Account {address} can't buy and sell\nPLS: {pls}\nTokens amount:{tokens_amount}")
             # await bot.send_message(channel_id,
-            #                        f"Account {address} can't buy and sell\nBNB balance: {trader.wei_to_eth(bnb)}\nTokens balance:{tokens_amount / trader.decimals}")
+            #                        f"Account {address} can't buy and sell\nPLS balance: {trader.wei_to_eth(pls)}\nTokens balance:{tokens_amount / trader.decimals}")
             await asyncio.sleep(INTERVAL)
 
 
 def init():
     global bot, dp, web3, trader, TX_URL, INTERVAL, channel_id
     config = load_config()
-    web3 = Web3(HTTPProvider(config['bscNode']))
+    web3 = Web3(HTTPProvider(config['pulseChainNode']))  # Changed from bscNode
     TX_URL = config['txUrl']
     channel_id = config['channelId']
     INTERVAL = config['intervalInSeconds']
 
-    router_abi = json.loads(config['pancakeswapRouterABI'])
-    router_address = Web3.toChecksumAddress(config['pancakeSwapRouterAddress'])
+    router_abi = json.loads(config['pulseXRouterABI'])  # Changed from pancakeswapRouterABI
+    router_address = Web3.toChecksumAddress(config['pulseXRouterAddress'])  # Changed from pancakeSwapRouterAddress
 
     logger.info(f'Connected: {web3.isConnected()}')
     logger.info(f'Chain ID: {web3.eth.chainId}')
