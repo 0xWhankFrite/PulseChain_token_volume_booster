@@ -15,13 +15,13 @@ class Trader:
 
     def __init__(self, web3: Web3, router_address, router_abi, token_contract: Contract, token_address):
         self.web3 = web3
-        self.router_address = router_address
+        self.router_address = router_address  # PulseX router address
         self.router_contract = self.web3.eth.contract(address=router_address, abi=router_abi)
         self.token_contract = token_contract
         self.token_address = token_address
         self.symbol = self.token_contract.functions.symbol().call()
         self.decimals = 10 ** self.token_contract.functions.decimals().call()
-        self.wbnb_address = self.router_contract.functions.WETH().call()
+        self.wpls_address = self.router_contract.functions.WETH().call()  # Use WPLS instead of WBNB
 
     def approve(self, wallet, private_key) -> None:
         """Give an router max approval of a token."""
@@ -40,8 +40,8 @@ class Trader:
             return True
         return False
 
-    def get_bnb_balance(self, wallet, in_ether: bool = False):
-        """Get the balance of BNB in a wallet."""
+    def get_pls_balance(self, wallet, in_ether: bool = False):
+        """Get the balance of PLS in a wallet."""
         balance = self.web3.eth.getBalance(wallet)
         return Web3.fromWei(balance, 'ether') if in_ether else balance
 
@@ -55,22 +55,22 @@ class Trader:
         """Get a predefined deadline. 10min by default (same as the Uniswap SDK)."""
         return int(time.time()) + 10 * 60
 
-    def can_buy(self, bnb, wallet=None, tx_fee=None) -> bool:
+    def can_buy(self, pls, wallet=None, tx_fee=None) -> bool:
         if not tx_fee and wallet:
             buy_function = self._swap_eth_for_tokens(wallet)
-            gas_limit = self.estimate_gas(buy_function, wallet, bnb)
+            gas_limit = self.estimate_gas(buy_function, wallet, pls)
             gas_price = self.web3.eth.gas_price
             tx_fee = self._calc_tx_fee(gas_limit, gas_price)
-        return bnb - (tx_fee * 6) > 0
+        return pls - (tx_fee * 6) > 0
 
     def can_sell(self, wallet, amount):
         sell_function = self._swap_tokens_for_eth(wallet, amount)
         gas_limit = self.estimate_gas(sell_function, wallet)
         gas_price = self.web3.eth.gas_price
         tx_fee = self._calc_tx_fee(gas_limit, gas_price)
-        bnb_balance = self.get_bnb_balance(wallet)
+        pls_balance = self.get_pls_balance(wallet)
         print(tx_fee)
-        return bnb_balance - tx_fee > 0
+        return pls_balance - tx_fee > 0
 
     @staticmethod
     def estimate_gas(function: ContractFunction, address_from, value: Wei = Wei(0)) -> Wei:
@@ -83,7 +83,7 @@ class Trader:
         if value > 0:
             tx_fee = self._calc_tx_fee(gas_limit, gas_price)
             if not self.can_buy(value, tx_fee=tx_fee):
-                raise Exception('BNB balance is insufficient for [BUY]')
+                raise Exception('PLS balance is insufficient for [BUY]')
             value -= tx_fee * 6
         return {
             'from': address_from,
@@ -114,38 +114,38 @@ class Trader:
 
     def _swap_eth_for_tokens(self, wallet):
         return self.router_contract.functions.swapExactETHForTokens(
-            0,
-            [self.wbnb_address, self.token_address],
+            0,  # Minimum output amount (adjust as needed)
+            [self.wpls_address, self.token_address],  # Use WPLS path
             wallet,
             self._deadline()
         )
 
-    def buy(self, wallet, private_key, bnb_amount) -> dict:
+    def buy(self, wallet, private_key, pls_amount) -> dict:
         try:
             buy_function = self._swap_eth_for_tokens(wallet)
             balance_before = self.get_token_balance(wallet, formatted=True)
             before = time.time()
-            tx_params = self._get_tx_params(buy_function, wallet, bnb_amount)
-            bnb_used = self.wei_to_eth(tx_params["value"])
-            logger.info(f'[BUY] using {wallet} {self.symbol} token for {bnb_used} BNB')
+            tx_params = self._get_tx_params(buy_function, wallet, pls_amount)
+            pls_used = self.wei_to_eth(tx_params["value"])
+            logger.info(f'[BUY] using {wallet} {self.symbol} token for {pls_used} PLS')
             tx_hash = self._build_and_send_tx(buy_function, wallet, private_key, tx_params)
             tx_hash_hex = str(self.web3.toHex(tx_hash))
             receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash)
 
             after = time.time()
             after_balance = self.get_token_balance(wallet, formatted=True)
-            after_bnb_balance = self.get_bnb_balance(wallet, in_ether=True)
+            after_pls_balance = self.get_pls_balance(wallet, in_ether=True)
             if receipt.status == 1:
                 logger.info(
-                    f"[BUY] Successfully bought {after_balance - balance_before} {self.symbol} for {bnb_used} BNB - TX HASH: {tx_hash_hex}")
+                    f"[BUY] Successfully bought {after_balance - balance_before} {self.symbol} for {pls_used} PLS - TX HASH: {tx_hash_hex}")
                 logger.info(f'Time spend: {after - before} secs')
-                tx_fee = self.wei_to_eth(bnb_amount) - (after_bnb_balance + bnb_used)
+                tx_fee = self.wei_to_eth(pls_amount) - (after_pls_balance + pls_used)
                 logger.info(f'Tx fee: {tx_fee}')
-                logger.info(f'Current BNB balance: {after_bnb_balance}')
+                logger.info(f'Current PLS balance: {after_pls_balance}')
                 logger.info(f'Current {self.symbol} balance: {after_balance}\n')
             else:
                 logger.error(f'Transaction failed: {receipt}')
-            return {'tx': tx_hash_hex, 'status': receipt.status, 'bnb': bnb_used,
+            return {'tx': tx_hash_hex, 'status': receipt.status, 'bnb': pls_used,  # 'bnb' key kept for compatibility
                     'amount': after_balance - balance_before}
         except Exception as e:
             logger.exception(f"[ERROR] while [BUY]: {e}")
@@ -153,8 +153,8 @@ class Trader:
     def _swap_tokens_for_eth(self, wallet, amount):
         return self.router_contract.functions.swapExactTokensForETHSupportingFeeOnTransferTokens(
             amount,
-            0,
-            [self.token_address, self.wbnb_address],
+            0,  # Minimum output amount (adjust as needed)
+            [self.token_address, self.wpls_address],  # Use WPLS path
             wallet,
             self._deadline()
         )
@@ -165,10 +165,10 @@ class Trader:
                 raise Exception('Invalid token amount or token balance is insufficient')
             if not self._is_approved(wallet):
                 self.approve(wallet, private_key)
-            logger.info(f'[SELL] using {wallet} {amount / self.decimals} {self.symbol} tokens for BNB')
+            logger.info(f'[SELL] using {wallet} {amount / self.decimals} {self.symbol} tokens for PLS')
             sell_function = self._swap_tokens_for_eth(wallet, amount)
 
-            before_bnb_balance = self.get_bnb_balance(wallet, in_ether=True)
+            before_pls_balance = self.get_pls_balance(wallet, in_ether=True)
             before = time.time()
             tx_params = self._get_tx_params(sell_function, wallet)
             tx_hash = self._build_and_send_tx(sell_function, wallet, private_key, tx_params)
@@ -177,16 +177,16 @@ class Trader:
 
             after = time.time()
             after_balance = self.get_token_balance(wallet, formatted=True)
-            after_bnb_balance = self.get_bnb_balance(wallet, in_ether=True)
+            after_pls_balance = self.get_pls_balance(wallet, in_ether=True)
             if receipt.status == 1:
                 logger.info(
-                    f"[SELL] Successfully sold {amount / self.decimals} {self.symbol} for {after_bnb_balance - before_bnb_balance} BNB - TX HASH: {tx_hash_hex}")
+                    f"[SELL] Successfully sold {amount / self.decimals} {self.symbol} for {after_pls_balance - before_pls_balance} PLS - TX HASH: {tx_hash_hex}")
                 logger.info(f'Time spend: {after - before} secs')
-                logger.info(f'Current BNB balance: {after_bnb_balance}')
+                logger.info(f'Current PLS balance: {after_pls_balance}')
                 logger.info(f'Current {self.symbol} balance: {after_balance}\n')
             else:
                 logger.error(f'Transaction failed: {receipt}')
-            return {'tx': tx_hash_hex, 'status': receipt.status, 'bnb': after_bnb_balance - before_bnb_balance,
+            return {'tx': tx_hash_hex, 'status': receipt.status, 'bnb': after_pls_balance - before_pls_balance,  # 'bnb' key kept for compatibility
                     'amount': amount / self.decimals}
 
         except Exception as e:
